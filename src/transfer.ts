@@ -6,6 +6,14 @@ import { getEthscriptionsByAddress, getTransactionFee } from './api'
 import { retry } from './utils'
 import { EXPLORER_URL, RPC_URL } from './constants'
 
+interface Token {
+  hash: string
+  p: string
+  tick: string
+  id: string
+  amt: string
+}
+
 async function getAllTokens(address: string) {
   const ethscriptions = []
   let page = 1
@@ -20,7 +28,7 @@ async function getAllTokens(address: string) {
   }
   const tokenReg =
     /data:,{"p":"(.+)","op":"mint","tick":"(.+)","id":"(\d+)","amt":"(\d+)"}/
-  const tokens = ethscriptions
+  const tokens: Token[] = ethscriptions
     .filter((ethscription) => {
       return ethscription.content_uri.match(tokenReg)
     })
@@ -38,15 +46,7 @@ async function getAllTokens(address: string) {
   return tokens
 }
 
-function formatTokens(
-  tokens: {
-    hash: string
-    p: string
-    tick: string
-    id: string
-    amt: string
-  }[],
-) {
+function formatTokens(tokens: Token[]) {
   const formattedTokens = []
   const tokenMap = new Map()
 
@@ -70,18 +70,6 @@ function formatTokens(
 
 const provider = new JsonRpcProvider(RPC_URL)
 const signer = new Wallet(process.env.PRIVATE_KEY!, provider)
-
-async function transfer(hashList: string[], nonce: number, address: string) {
-  const promises = hashList.map((hash, index) =>
-    signer.sendTransaction({
-      to: address,
-      value: parseEther('0'),
-      data: hash,
-      nonce: nonce + index,
-    }),
-  )
-  return Promise.all(promises)
-}
 
 async function run() {
   const tokens = await getAllTokens(signer.address)
@@ -127,11 +115,13 @@ async function run() {
     message: '请输入接收铭文的地址',
   })
 
-  const nonce = await provider.getTransactionCount(signer.address)
+  const transferList = list.slice(0, count)
+  const data = `0x${transferList.map((t: any) => t.hash.slice(2)).join('')}`
+
   const txFee = await getTransactionFee(provider, signer, {
     to: signer.address,
     value: parseEther('0'),
-    data: '0x0000000000000000000000000000000000000000000000000000000000000000',
+    data,
   })
   const { value: confirm } = await prompts({
     type: 'confirm',
@@ -144,18 +134,14 @@ async function run() {
 
   console.log('\n开始转移...\n')
 
-  const transferList = list.slice(0, count)
-  const receipts = await transfer(
-    transferList.map((t: any) => t.hash),
-    nonce,
-    address,
-  )
-  console.log(
-    receipts.map((receipt, index) => ({
-      id: transferList[index].id,
-      tx: `${EXPLORER_URL}/tx/${receipt.hash}`,
-    })),
-  )
+  const tx = await signer.sendTransaction({
+    to: address,
+    value: parseEther('0'),
+    data,
+  })
+
+  console.log(`${EXPLORER_URL}/tx/${tx.hash}`)
+  console.log(transferList.map((t: any) => t.id))
 }
 
 run()
